@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>宿題・小テスト管理カレンダー</title>
+    <!-- 紙吹雪ライブラリ -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        body { font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0 15px; background-color: #f4f7f6; }
+        h1 { color: #333; text-align: center; }
+        
+        .card { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        
+        input, select, textarea, button { width: 100%; padding: 8px; margin: 5px 0 12px 0; box-sizing: border-box; }
+        textarea { resize: vertical; height: 60px; font-family: sans-serif; }
+        button { background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #45a049; }
+
+        .sub-add-box { display: flex; gap: 5px; margin-bottom: 12px; }
+        .sub-add-box input { margin: 0; }
+        .sub-add-box button { width: auto; margin: 0; padding: 8px 15px; background-color: #007bff; }
+        .sub-add-box button:hover { background-color: #0056b3; }
+
+        /* 認証画面・バー用 */
+        #authScreen { display: none; text-align: center; max-width: 400px; margin: 50px auto; }
+        #appScreen { display: none; }
+        .user-bar { display: flex; justify-content: space-between; align-items: center; background: #e9ecef; padding: 8px 12px; border-radius: 6px; margin-bottom: 15px; font-size: 0.9em; }
+        .user-bar button { width: auto; margin: 0; padding: 4px 10px; background-color: #dc3545; font-size: 0.8em; }
+        .user-bar button:hover { background-color: #c82333; }
+        .auth-switch { color: #007bff; cursor: pointer; font-size: 0.9em; margin-top: 10px; text-decoration: underline; }
+
+        /* フィルター部分のスタイル */
+        .filter-row { display: flex; gap: 10px; align-items: center; margin: 0; }
+        .filter-row select { margin: 0; }
+
+        /* カレンダーのヘッダー */
+        .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .calendar-header button { width: auto; padding: 5px 15px; margin: 0; }
+
+        /* カレンダー本体のグリッド */
+        .weekdays { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-weight: bold; color: #666; margin-bottom: 5px; }
+        .days-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+        
+        .day-cell {
+            background: #fafafa;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            min-height: 80px;
+            padding: 4px;
+            font-size: 0.85em;
+            overflow: hidden;
+            position: relative;
+        }
+        .day-cell.other-month { background: #f0f0f0; color: #aaa; }
+        .day-number { font-weight: bold; margin-bottom: 2px; }
+
+        /* カレンダー内のタスクチップ */
+        .task-chip {
+            font-size: 0.75em;
+            padding: 2px 4px;
+            margin-bottom: 2px;
+            border-radius: 3px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+        }
+        .task-chip.homework { background-color: #e3eeff; color: #004085; border-left: 3px solid #007bff; }
+        .task-chip.exam { background-color: #ffe3e3; color: #850000; border-left: 3px solid #dc3545; }
+
+        /* 完了済みリストのスタイル */
+        .history-list { list-style: none; padding: 0; margin: 0; max-height: 150px; overflow-y: auto; }
+        .history-item { font-size: 0.85em; padding: 6px; border-bottom: 1px solid #eee; color: #555; }
+        .history-item span.done-text { text-decoration: line-through; color: #888; }
+        .clear-history-btn { background-color: #e74c3c; width: auto; padding: 4px 10px; font-size: 0.8em; margin: 5px 0 0 0; }
+        .clear-history-btn:hover { background-color: #c0392b; }
+    </style>
+</head>
+<body>
+
+    <!-- ログイン・新規登録画面 -->
+    <div id="authScreen" class="card">
+        <h2 id="authTitle">ログイン</h2>
+        <input type="email" id="authEmail" placeholder="メールアドレス (ID)">
+        <input type="password" id="authPassword" placeholder="パスワード">
+        <button type="button" id="authBtn" onclick="handleAuth()">ログイン</button>
+        <div class="auth-switch" id="authSwitchText" onclick="toggleAuthMode()">アカウントをお持ちでない方は新規登録</div>
+    </div>
+
+    <!-- メインアプリ画面（ログイン後に表示） -->
+    <div id="appScreen">
+        <div class="user-bar">
+            <span id="userEmailDisplay">ログイン中...</span>
+            <button type="button" onclick="logoutUser()">ログアウト</button>
+        </div>
+
+        <h1>📚 宿題・小テスト管理カレンダー <span style="font-size: 0.5em; color: #666;">v2.0</span></h1>
+
+        <!-- 予定追加フォーム -->
+        <div class="card">
+            <h3>新しい予定を追加</h3>
+            <label>タイトル（内容）:</label>
+            <input type="text" id="title" placeholder="例: ワークP.30">
+
+            <label>種類:</label>
+            <select id="type">
+                <option value="homework">宿題</option>
+                <option value="exam">小テスト</option>
+            </select>
+
+            <label>ジャンル（科目など）:</label>
+            <select id="subjectSelect"></select>
+
+            <label>新しいジャンルを追加する:</label>
+            <div class="sub-add-box">
+                <input type="text" id="newSubjectInput" placeholder="例: プログラミング など">
+                <button type="button" onclick="addNewSubject()">追加</button>
+            </div>
+
+            <label>詳細メモ（任意）:</label>
+            <textarea id="detail" placeholder="例: ページ30〜32まで。ノートに解く。"></textarea>
+
+            <label>期限（日付）:</label>
+            <input type="date" id="dueDate">
+
+            <button type="button" onclick="addTask()">予定を追加する</button>
+        </div>
+
+        <!-- フィルターエリア -->
+        <div class="card">
+            <h3>🔍 表示するジャンルを絞り込む</h3>
+            <div class="filter-row">
+                <select id="filterSubject" onchange="renderAll()">
+                    <option value="all">すべてのジャンル</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- カレンダー表示エリア -->
+        <div class="card">
+            <div class="calendar-header">
+                <button type="button" onclick="changeMonth(-1)">前の月</button>
+                <h3 id="monthYear"></h3>
+                <button type="button" onclick="changeMonth(1)">次の月</button>
+            </div>
+            <div class="weekdays">
+                <div>日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div>
+            </div>
+            <div class="days-grid" id="daysGrid"></div>
+        </div>
+
+        <!-- 完了した履歴エリア -->
+        <div class="card">
+            <h3>✅ 完了した履歴</h3>
+            <ul id="historyList" class="history-list">
+                <p style="color: #888; font-size: 0.85em;">まだ完了した予定はありません。</p>
+            </ul>
+            <button type="button" class="clear-history-btn" onclick="clearHistory()">履歴をクリア</button>
+        </div>
+    </div>
+
+    <!-- Firebase SDK の読み込み -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // あなたのFirebase設定
+        const firebaseConfig = {
+            apiKey: "AIzaSyAX7L_HgMpjR4BrcifVMw4b9lJkrS728_c",
+            authDomain: "study-calendar-c0c94.firebaseapp.com",
+            projectId: "study-calendar-c0c94",
+            storageBucket: "study-calendar-c0c94.firebasestorage.app",
+            messagingSenderId: "128580754964",
+            appId: "1:128580754964:web:898bf3112baba571391101"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        let currentUser = null;
+        let isRegisterMode = false;
+        let taskList = [];
+        let historyList = [];
+        let subjects = ['国語', '数学', '英語', '理科', '社会', 'その他'];
+        let currentDate = new Date();
+
+        // ログイン状態の監視
+        onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                currentUser = user;
+                document.getElementById('authScreen').style.display = 'none';
+                document.getElementById('appScreen').style.display = 'block';
+                document.getElementById('userEmailDisplay').innerText = `ログイン中: ${user.email}`;
+                await loadCloudData();
+                renderAll();
+            } else {
+                currentUser = null;
+                document.getElementById('authScreen').style.display = 'block';
+                document.getElementById('appScreen').style.display = 'none';
+            }
+        });
+
+        // ログイン・新規登録の切り替え
+        window.toggleAuthMode = function() {
+            isRegisterMode = !isRegisterMode;
+            document.getElementById('authTitle').innerText = isRegisterMode ? '新規アカウント登録' : 'ログイン';
+            document.getElementById('authBtn').innerText = isRegisterMode ? '登録する' : 'ログイン';
+            document.getElementById('authSwitchText').innerText = isRegisterMode ? 'すでにアカウントをお持ちの方はこちら' : 'アカウントをお持ちでない方は新規登録';
+        }
+
+        // 認証処理
+        window.handleAuth = async function() {
+            const email = document.getElementById('authEmail').value.trim();
+            const password = document.getElementById('authPassword').value;
+
+            if (!email || !password) {
+                alert('メールアドレスとパスワードを入力してください！');
+                return;
+            }
+
+            try {
+                if (isRegisterMode) {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                    alert('アカウント登録が完了しました！');
+                } else {
+                    await signInWithEmailAndPassword(auth, email, password);
+                }
+            } catch (error) {
+                alert('エラーが発生しました: ' + error.message);
+            }
+        }
+
+        window.logoutUser = async function() {
+            await signOut(auth);
+        }
+
+        // クラウドからデータ取得
+        async function loadCloudData() {
+            if (!currentUser) return;
+            try {
+                const docRef = doc(db, "users", currentUser.uid);
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    taskList = data.tasks || [];
+                    historyList = data.history || [];
+                    subjects = data.subjects || ['国語', '数学', '英語', '理科', '社会', 'その他'];
+                } else {
+                    taskList = [];
+                    historyList = [];
+                    subjects = ['国語', '数学', '英語', '理科', '社会', 'その他'];
+                }
+            } catch (e) {
+                console.error("データ読み込みエラー:", e);
+            }
+        }
+
+        // クラウドへデータ保存
+        async function saveCloudData() {
+            if (!currentUser) return;
+            try {
+                const docRef = doc(db, "users", currentUser.uid);
+                await setDoc(docRef, {
+                    tasks: taskList,
+                    history: historyList,
+                    subjects: subjects
+                });
+            } catch (e) {
+                console.error("データ保存エラー:", e);
+            }
+        }
+
+        window.updateSubjectDropdowns = function() {
+            const subjectSelect = document.getElementById('subjectSelect');
+            const filterSubject = document.getElementById('filterSubject');
+            if (!subjectSelect || !filterSubject) return;
+
+            const currentSelected = subjectSelect.value;
+            const currentFilter = filterSubject.value;
+
+            subjectSelect.innerHTML = '';
+            subjects.forEach(sub => {
+                const opt = document.createElement('option');
+                opt.value = sub;
+                opt.innerText = sub;
+                subjectSelect.appendChild(opt);
+            });
+            if (subjects.includes(currentSelected)) subjectSelect.value = currentSelected;
+
+            filterSubject.innerHTML = '<option value="all">すべてのジャンル</option>';
+            subjects.forEach(sub => {
+                const opt = document.createElement('option');
+                opt.value = sub;
+                opt.innerText = sub;
+                filterSubject.appendChild(opt);
+            });
+            if (currentFilter === 'all' || subjects.includes(currentFilter)) {
+                filterSubject.value = currentFilter;
+            } else {
+                filterSubject.value = 'all';
+            }
+        }
+
+        window.addNewSubject = function() {
+            const input = document.getElementById('newSubjectInput');
+            if (!input) return;
+            const newSub = input.value.trim();
+            if (!newSub) {
+                alert('追加するジャンル名を入力してください！');
+                return;
+            }
+            if (subjects.includes(newSub)) {
+                alert('そのジャンルはすでに存在します。');
+                return;
+            }
+            subjects.push(newSub);
+            saveCloudData();
+            updateSubjectDropdowns();
+            input.value = '';
+            alert(`「${newSub}」を追加しました！`);
+        }
+
+        window.addTask = function() {
+            const titleInput = document.getElementById('title');
+            const typeInput = document.getElementById('type');
+            const subjectSelect = document.getElementById('subjectSelect');
+            const detailInput = document.getElementById('detail');
+            const dueDateInput = document.getElementById('dueDate');
+
+            if (!titleInput || !typeInput || !subjectSelect || !detailInput || !dueDateInput) return;
+
+            const title = titleInput.value.trim();
+            const type = typeInput.value;
+            const subject = subjectSelect.value;
+            const detail = detailInput.value.trim();
+            const dueDate = dueDateInput.value;
+
+            if (!title || !dueDate) {
+                alert('タイトルと期限のどちらも入力してください！');
+                return;
+            }
+
+            const newTask = {
+                id: Date.now(),
+                title: title,
+                type: type,
+                subject: subject,
+                detail: detail,
+                dueDate: dueDate
+            };
+
+            taskList.push(newTask);
+            saveCloudData();
+
+            const parts = dueDate.split('-');
+            if (parts.length === 3) {
+                currentDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+            }
+
+            renderAll();
+            titleInput.value = '';
+            detailInput.value = '';
+        }
+
+        window.handleTaskClick = function(task) {
+            const typeLabel = task.type === 'homework' ? '【宿題】' : '【小テスト】';
+            const detailText = task.detail ? task.detail : '（詳細メモはありません）';
+            
+            const message = `${typeLabel} [${task.subject}] ${task.title}\n期限: ${task.dueDate}\n\n【詳細メモ】\n${detailText}\n\n------------------------\nこの予定を「完了」にしますか？`;
+            
+            if (confirm(message)) {
+                confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+
+                const taskIndex = taskList.findIndex(t => t.id === task.id);
+                if (taskIndex !== -1) {
+                    const completedTask = taskList.splice(taskIndex, 1)[0];
+                    completedTask.completedAt = new Date().toLocaleDateString('ja-JP');
+                    historyList.unshift(completedTask);
+                }
+
+                saveCloudData();
+                renderAll();
+            }
+        }
+
+        window.clearHistory = function() {
+            if (confirm('完了した履歴をすべて削除しますか？')) {
+                historyList = [];
+                saveCloudData();
+                renderAll();
+            }
+        }
+
+        window.changeMonth = function(direction) {
+            currentDate.setMonth(currentDate.getMonth() + direction);
+            renderCalendar();
+        }
+
+        window.renderAll = function() {
+            updateSubjectDropdowns();
+            renderCalendar();
+            renderHistory();
+        }
+
+        window.renderCalendar = function() {
+            const year = currentDate.getFullYear();
+            const month = currentDate.getMonth();
+
+            const monthYearEl = document.getElementById('monthYear');
+            if (monthYearEl) {
+                monthYearEl.innerText = `${year}年 ${month + 1}月`;
+            }
+
+            const selectedFilter = document.getElementById('filterSubject').value;
+            const firstDayIndex = new Date(year, month, 1).getDay();
+            const lastDay = new Date(year, month + 1, 0).getDate();
+            const prevLastDay = new Date(year, month, 0).getDate();
+
+            const grid = document.getElementById('daysGrid');
+            if (!grid) return;
+            grid.innerHTML = '';
+
+            for (let i = firstDayIndex; i > 0; i--) {
+                const dayDiv = document.createElement('div');
+                dayDiv.className = 'day-cell other-month';
+                dayDiv.innerHTML = `<div class="day-number">${prevLastDay - i + 1}</div>`;
+                grid.appendChild(dayDiv);
+            }
+
+            for (let day = 1; day <= lastDay; day++) {
+                const dayDiv = document.createElement('div');
+                dayDiv.className = 'day-cell';
+                
+                const monthStr = String(month + 1).padStart(2, '0');
+                const dayStr = String(day).padStart(2, '0');
+                const dateStr = `${year}-${monthStr}-${dayStr}`;
+                
+                dayDiv.innerHTML = `<div class="day-number">${day}</div>`;
+
+                const dayTasks = taskList.filter(task => {
+                    const matchDate = task.dueDate === dateStr;
+                    const matchSubject = (selectedFilter === 'all' || task.subject === selectedFilter);
+                    return matchDate && matchSubject;
+                });
+
+                dayTasks.forEach(task => {
+                    const chip = document.createElement('div');
+                    chip.className = `task-chip ${task.type}`;
+                    chip.innerText = `[${task.subject}] ${task.title}`;
+                    chip.title = `クリックして詳細を表示: ${task.title}`;
+                    chip.onclick = () => handleTaskClick(task);
+                    dayDiv.appendChild(chip);
+                });
+
+                grid.appendChild(dayDiv);
+            }
+        }
+
+        window.renderHistory = function() {
+            const ul = document.getElementById('historyList');
+            if (!ul) return;
+            ul.innerHTML = '';
+
+            if (historyList.length === 0) {
+                ul.innerHTML = '<p style="color: #888; font-size: 0.85em;">まだ完了した予定はありません。</p>';
+                return;
+            }
+
+            historyList.forEach(item => {
+                const li = document.createElement('li');
+                li.className = 'history-item';
+                const typeLabel = item.type === 'homework' ? '【宿題】' : '【小テスト】';
+                const detailStr = item.detail ? ` (メモ: ${item.detail})` : '';
+                li.innerHTML = `
+                    <div>
+                        <span class="done-text">${typeLabel} [${item.subject}] ${item.title}${detailStr}</span>
+                        <div style="font-size: 0.75em; color: #888;">期限: ${item.dueDate} (完了日: ${item.completedAt})</div>
+                    </div>
+                `;
+                ul.appendChild(li);
+            });
+        }
+    </script>
+</body>
+</html>
